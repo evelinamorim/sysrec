@@ -18,6 +18,7 @@
 
 #include <iostream>
 #include "le.h"
+#include "recomenda.h"
 
 using namespace std;
 
@@ -44,6 +45,10 @@ int main(int argc,char** argv){
     //leObj.imprime_notas(n);
     //leObj.imprime_usuarios(u);
     //leObj.imprime_itens(i);
+
+    Recomenda recomenda_obj;
+    recomenda_obj.computa_similaridade(1,n);
+    
 
     //cout<<arquivoUsuario<<" "<<arquivoItem<<" "<<arquivoNotas<<endl;
     return 0;

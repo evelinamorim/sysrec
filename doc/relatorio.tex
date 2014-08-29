@@ -1,0 +1,516 @@
+\documentclass[a4paper]{article}
+%\usepackage[utf8]{inputenc}
+\usepackage[latin1]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+%\usepackage{ntheorem}
+\usepackage[pdftex]{graphicx}
+%\usepackage{subfigure}
+\usepackage[top=3cm, bottom=2cm, left=3cm, right=2cm]{geometry} 
+\usepackage{enumerate} 
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{url}
+
+\newcommand{\BigO}[1]{\ensuremath{\operatorname{O}\bigl(#1\bigr)}}
+
+\begin{document}
+
+%\bibliographystyle{alpha} % Choose Phys. Rev. style for bibliography
+
+
+\title{Trabalho Prático I - Recuperação de Informação}
+\author{Prof. Nivio Ziviani e Prof. Berthier Ribeiro-Neto \\ \\ Evelin Carvalho Freire de Amorim}
+%\date{\today}
+
+\maketitle
+
+
+\section{Introdução}
+
+
+A estrutura de um índice tem como finalidade acessar determinada informação 
+de forma eficiente. Por exemplo, o índice de um livro auxilia a localização 
+rápida de tópicos. Índices também são utilizados para localizar 
+documentos dentro de uma coleção. Esta utilidade é largamente implementada 
+nas máquinas de busca na web. 
+
+Documentos produzidos na web são recuperados todos os dias por máquinas de buscas 
+e indexados a fim de que as pessoas possam obter as informações que desejam. 
+No entanto, o mecanismo de índice de tais documentos deve ser bem projetado 
+para que a recuperação seja eficiente. O chamado 
+\textit{índice invertido} é uma estrutura que possibilita a recuperação 
+eficaz de documentos.
+
+%definicoes
+Índice invertido\cite{Witten1999} é um índice onde termos (palavras por exemplo) 
+são mapeados para sua localização. Esta localização pode ser a identificação 
+do documento ou de uma página. Em máquinas de busca \emph{web} documentos 
+recuperados 
+são processados de forma que cada palavra é associada com uma tupla de dois 
+elementos, onde o primeiro elemento é o documento e o segundo elemento é a 
+posição da palavra no documento. Assim quando um usuário busca por uma palavra 
+a máquina de busca consegue chegar rapidamente em quais documentos a palavra 
+se encontra.
+
+O objetivo deste trabalho é projetar e implementar um sistema computacional 
+para recuperar eficientemente informação em grandes arquivos armazenados em 
+memória secundária utilizando o índice invertido. Este relatório apresentará 
+como este objetivo foi alcançado descrevendo os detalhes da implementação e 
+também do desempenho do sistema. 
+
+
+\section{Projeto do Sistema}
+
+O sistema computacional que constrói o índice é composto das seguintes partes:
+
+\begin{enumerate}
+  \item Processamento de documentos;
+      \begin{enumerate}
+         \item Tokenização de documento;
+          \item Construção do vocabulário;
+          \item Escrita de triplas não ordenadas em disco;
+      \end{enumerate}
+  \item Ordenação de triplas em disco;
+  \item Pesquisa booleana no índice ordenado.
+\end{enumerate}
+
+Na Figura \ref{pic:arquitetura} existe um diagrama de como estas partes interagem.
+
+\begin{figure}[H] 
+    \centering
+    \includegraphics[scale=0.5]{arquiteturaindex.png}
+    \caption{Diagrama do Sistema de Índice}
+    \label{pic:arquitetura}
+\end{figure}
+
+\subsection{Processamento de Documentos} 
+
+Os documentos da base de dados 
+estão  em formato compactado. Por este motivo foi utilizado uma biblioteca 
+fornecida pelos professores e baseada na biblioteca ziplib\footnote{http://www.zlib.net}. Para cada documento descompactado, o parser de HTML 
+htmlcxx\footnote{http://htmlcxx.sourceforge.net} processa o HTML de forma 
+que seja possível a tokenização do documento. Cada documento foi processado 
+no formato de árvore DOM. Embora a árvore DOM ocupe mais memória que a 
+representação SAX, a escolha da representação DOM foi feita devido a grande 
+familiaridade que 
+já possuo com a estrutura. Assim a implementação do sistema poderia ser feita de 
+forma mais rápida.
+
+A codificação dos documentos da base é variada, como UTF-8 e ISO-8859-1. No 
+entanto, no meu sistema não foi feito nenhum tratamento desta codificação 
+variada. Como consequência palavras iguais podem ser indexadas como 
+palavras distintas, causando uma explosão no vocabulário e também prejudicando 
+a busca de um dado termo na base de documentos. Por exemplo, considere a frase 
+``está é bem assim'' criada com a codificação  UTF-8. 
+Com a codificação ISO-8859-1 ela poderá ficar como  ``estÃ¡ Ã© bem assim''.  
+Se o usuário buscar por ``está'' ele não encontrará a palavra ``estÃ¡'', embora 
+elas sejam a mesma palavra.
+
+Apenas um documento é carregado na memória por vez. Durante este tempo 
+que está em memória ele é processado pelo parser HTML para em seguida 
+o sistema tokenizar as palavras contidas no documento. O processo de tokenização 
+consiste em separar o texto em tokens, que são unidades de texto. Cada token é 
+separado de outro token de acordo com 12 caracteres especiais, como espaço, 
+pontuação, parenteses, dentre outros. Durante a separação dos tokens
+a posição em que eles ocupam no documento  também é computada. A posição é 
+a quantidade de palavras que vieram antes do dado termo, por exemplo, considere 
+a frase a seguir:
+
+\begin{center}
+    \emph{ ``And so even though we face the difficulties of today and}
+    \emph{tomorrow, I still have a dream. It is a dream deeply rooted}
+\emph{in the American dream.''}
+\end{center}
+
+A palavra \textit{And} está na posição 0, a palavra \textit{so} está na posição 1, 
+a palavra \textit{even} está na posição 2 e assim por diante. Caso uma palavra 
+ocorra mais de uma vez no documento a lista de posições armazena uma lista 
+de ``intervalos''. Por exemplo, considere a palavra \textit{dream} no documento 
+acima. A lista de posições de \textit{dream} é dada por $\{17,21,27\}$, no 
+entanto podemos resumi-la através da lista de intervalos que é dada por 
+$\{17,4,6\}$. Veja que cada elemento da lista, exceto o primeiro elemento, 
+é substituído pela diferença entre o valor na posição corrente menos o valor 
+na posição anterior. A intenção ao usar lista de intervalos é que poucos 
+bits são necessários para representar cada posição na compressão Elias-$\gamma$. 
+
+A computação de cada documento preenche em memória uma tabela hash, a qual 
+representa o vocabulário. Nesta tabela cada palavra é associada a um inteiro, que 
+após a ordenação do índice recebe como valor a posição em disco do termo 
+no índice. A implementação de tabela hash utilizada é uma biblioteca padrão 
+do C++ chamada \texttt{unordered\_map}. De acordo com a referência da linguagem 
+\cite{cplusplus} a complexidade desta estrutura para acesso a uma chave é no 
+caso médio de \BigO{1} e no pior caso de \BigO{n}.
+
+A cada iteração o vocabulário acumula em memória o conjunto de palavras 
+de um documento e a lista de posições em que aquela palavra está no documento. 
+Após a leitura do documento o sistema escreve em disco triplas do tipo: 
+\texttt{<termo,documento,posicao>}.  Cada elemento desta tripla é representada por 
+inteiro e estas triplas não estão ordenadas. Cada palavra possui um tamanho 
+fixo de 20 caracteres, caso passe deste tamanho a cadeia de caracteres é 
+``quebrada''.
+
+O sistema aplica a compactação para Elias-$\gamma$ durante o processo de escrita 
+em disco das triplas não ordenadas. Desta forma é possível tirar proveito da 
+eficiência da compactação para a etapa da ordenação. Após a escrita em disco das triplas o espaço ocupado pelas listas de posições dos termos é liberado e o espaço é ocupado pelo próximo documento.
+
+A \textbf{complexidade de memória} desta etapa é custosa, visto que o documento 
+é armazenado todo em memória através da árvore DOM e o vocabulário é mantido em 
+memória. Assim considere que em cada iteração a complexidade de memória é 
+a complexidade de memória documento sendo percorrido e os documentos já 
+pecorridos. 
+
+%calcular media destes numeros
+%A complexidade de memória em cada iteração é \BigO{|t|*b+20*n*N} bytes, 
+%onde $t$ é o número de nós de uma dada árvore DOM, $b$ é o número médio 
+%de caracteres em um nó da árvore, $n$ é quantidade de palavras distintas 
+%em uma árvore e $N$ é quantidade média de ocorrências de uma palavra em 
+%um documento. %TODO: fazer calculo com as medias e dizer quanto fica em memoria
+%TODO e o voabulario?
+
+O vocabulário no final da iterações ocupará na memória n(20+4) bytes em memória, 
+onde 20 é o tamanho médio reservado para cada chave no vocabulário e 4 bytes é 
+reservado ao inteiro associado a chave.
+
+A \textbf{complexidade de tempo} depende de três variáveis: a quantidade $|D|$ de 
+documentos, o tamanho $|t|$ da árvore DOM e da quantidade $|s|$ de caracteres  
+no documento. Estou considerando que o tempo médio de acesso a tabela hash 
+que armazena o vocabulário é \BigO{1}, pois caso contrário este tempo deveria ser 
+considerado também. Para cada documento a árvore dom é percorrida em \BigO{|t|}. 
+No entanto para cada nó dom percorrido em $t$ é necessário percorrer as cadeias 
+de caracteres presentes em cada nó para a tokenização. Assim o tempo 
+final desta etapa fica em \BigO{|D||t||s|}.
+
+
+\subsection{Ordenação em Disco}
+
+A ordenação em disco inicia com a leitura de \emph{runs}, que são blocos de 
+triplas. Cada \emph{run} é carregada na memória de uma cada vez. O 
+algoritmo utilizado para a ordenação em memória de cada \textit{run} é 
+o Mergesort. A escolha deste algoritmo se deu por dois motivos: complexidade de
+tempo e estabilidade\cite{Cormen2001}. 
+A complexidade de tempo do Mergesort é de $\Theta(n\lg{n})$.
+Embora seja um algoritmo recursivo, o Mergesort pode ser facilmente transformado 
+em um algoritmo iterativo para que possa consumir menos recursos computacionais. 
+Neste trabalho foi utilizada uma versão iterativa do Mergesort. 
+
+A questão da estabilidade no Mergesort é crucial considerando a forma que meu 
+tabalho foi implementado, visto que lista de intervalos 
+são utilizadas. Por exemplo, suponha que a primeira tripla do termo 1 seja 
+\texttt{<1,2,2>} e que após esta tripla no primeiro arquivo de triplas venha
+ a  tripla \texttt{<1,2,4>}. Como é utilizada uma lista de intervalos a posiçao 
+ do termo 1 na segunda tripla é na verdade 6. Então se a ordenação troca 
+ as duas triplas trocam de posição existe uma incoerência, visto que a posição 
+ 2 é anterior a posição 6. A ordenação de \emph{runs} considera apenas a 
+ comparação entre o número asssociado ao termo e o identificador associado ao 
+ documento. A ordenação em disco depende do tamanho estipulado da \emph{run}. 
+
+ Esta é uma etapa possível de ser paralelizada, no entanto devido a restrições 
+ de tempo esta melhoria não foi implementada. Para paralelizar este passo 
+ bastaria executar a ordenação de cada \emph{run} em uma \emph{thread} 
+ diferente.
+
+ Após a ordenação de cada \emph{run}, o sistema mescla as \emph{runs} em 
+um algoritmo conhecido com \emph{N-way mergesort}\cite{Witten1999}. Nesta 
+etapa um \emph{buffer} é carregado com os primeiros elementos de cada 
+\emph{run}. Com o \emph{buffer} armazenando o menor elemento de cada 
+\emph{run}, basta o algoritmo de ordenação de triplas escolher o menor dentre 
+estes elementos. O algoritmo de ordenação que implementei faz um acesso em 
+disco para cada escolha de menor elemento dentro do \emph{buffer} de menores.
+
+O algoritmo que mescla \emph{runs} acumula triplas de um dado termo em memória 
+até o momento que um novo documento com aquele termo é encontrado ou até o 
+momento que um novo termo é encontrado. Agora nesta fase a organização não é 
+mais em triplas como \texttt{<id\_termo,id\_doc,posicao>}. Com a finalidade 
+de alcançar uma compactação mais eficiente o armazenamento é feita em 
+quadruplas no formato \texttt{<id\_termo,id\_doc,freq\_termo\_doc,lista\_posicoes>}
+. Desta forma não é necessário mais replicar diversas vezes id\_termo e id\_doc.
+
+Durante o processo de ordenação a posição de cada termo no índice final é 
+armazenada na tabela que armazena o vocabulário. Após a ordenação a escrita do 
+vocabulário consiste em um arquivo txt comum que em cada linha existe 
+uma palavra e sua respectiva posição como um \emph{offset} de bits no 
+arquivo ordenado de índice.
+
+A \textbf{complexidade de tempo} da ordenação é dada pela ordenação das 
+\emph{runs} mais pelo merge das \emph{runs}. A ordenação das \emph{runs} 
+é dada por $\Theta(R\log n)$, onde $R$ é o número de \emph{runs} e \emph{n} 
+é o tamanho da \emph{run}. O merge das \emph{runs} é percorrido em 
+\BigO{\log R} passos.
+
+A \textbf{complexidade de memória} é dada basicamente pelos \emph{buffers} 
+utilizados no \emph{merge} da \emph{runs}, que é de $\Theta(cR)$, onde 
+$c$ é uma constante que determina quantos elementos de cada \emph{run} 
+serão carregados em memória.
+
+\subsection{Pesquisa} 
+
+A pesquisa construída nesta etapa do trabalho é uma versão simplificada da 
+pesquisa booleana\cite{Baeza1999}. Seguem as três possíveis sintaxes para 
+consulta.
+
+\begin{center}
+    \begin{tabular}{ll}
+	Consulta simples: & \texttt{$palavra$} \\
+	Consulta conjuntiva:& \texttt{$palavra_1$ AND $palavra_2$} \\
+	Consulta disjuntiva:& \texttt{$palavra_1$ OR $palavra_2$}\\
+    \end{tabular}
+\end{center}
+
+Na consulta simples o sistema busca \texttt{palavra} no índice comprimido 
+e retorna uma tabela (\texttt{unordered\_map}) com cada linha representando 
+um documento \texttt{d} e as posições que a \texttt{palavra} se encontra em 
+\texttt{d}. Na Figura \ref{diagramaseq} o diagrama de sequência para  consulta 
+descreve este processo de uma forma próxima da implementação.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[scale=0.5]{SequenceDiagramPesquisa.png}
+    \caption{Diagrama de sequência da Pesquisa}
+    \label{diagramaseq}
+\end{figure}
+
+A função \texttt{processa\_consulta} nesta etapa apenas verifica se a consulta 
+esta no formato simples, conjuntiva com duas palavras ou disjuntiva com duas 
+palavras. Na próxima etapa ela deverá ser modificada de forma que possa 
+executar consultas mais complexas. No momento a consulta disjuntiva não possui 
+nenhuma função específica, apenas a saída padrão exibe o resultado da consulta 
+simples de $palavra_1$ e depois exibe a consulta simples de $palavra_2$.
+
+Embora não tenha sido exibido no diagrama da Figura \ref{diagramaseq}, outra 
+função pode fazer parte dos passos executados na pesquisa: \texttt{interseção}. 
+Esta função é executa quando temos uma consulta no formato $palavra_1$ \texttt{AND}
+$palavra_2$. Neste caso o diagrama acima é \texttt{executa} para 
+$palavra_1$ e depois para $palavra_2$. No entanto as saídas de 
+\texttt{executa($palavra_1$)} e \texttt{executa($palavra_2$)} são entrada de 
+\texttt{interseção}. Dada a abordagem ingênua de \texttt{interseção} a 
+complexidade de tempo no pior caso de um interseção é dado por 
+\BigO{max(|t_1|,|t_2|)}, onde $t_1$ e $t_2$ são respectivamente a lista de 
+documentos para o termo 1 e a lista de documentos para o termo 2.
+
+A memória utilizada nesta etapa é dada por \BigO{|t_i||p_{i}|}, onde $t$ é a 
+quantidade de docuemntos onde ocorre o documento na base e $p_i$ é o tamanho da 
+maior lista de posições de documentos.
+
+\section{Manual do Sistema}
+
+Para a execução de testes automatizados optei por uma interface com o usuário 
+apenas no terminal nesta primeira fase do trabalho. Os testes para pesquisa 
+também estão desvinculados dos testes para índice.  No entanto, 
+com o \emph{script} embutido no Makefile - descrito a seguir - é possível testar 
+ambos módulos ao mesmo tempo sem dificuldade.
+
+
+\subsection{Compilação}
+
+Antes de compilar pode ser necessário inicializar algumas variáveis para construção do índice e para a realização da pesquisa. Após as configurações para compilar o código fonte do índice basta digitar no terminal:
+
+\texttt{> make ziplib}
+
+\texttt{> make index}
+
+Para compilar o código fonte da pesquisa basta digitar:
+
+\texttt{> make ziplib} (Caso ainda não tenah feito)
+
+\texttt{> make pesquisa}
+
+Caso queira compilar pesquisa e índice de uma vez só, basta digitar no terminal:
+
+\texttt{> make all}
+
+A configuração para a compilação do índice consiste em três partes: índice, pesquisa e makefile. Nas subseções a seguir a configuração necessária para a compilação de cada um dos itens listados estão detalhados.
+
+\subsection{Configurar Índice}
+
+A construção do índice gera dois arquivos: o arquivo de índice e o arquivo de vocabulário. A atribuição de tais nomes fica no arquivo coleca.cpp. No início de colecao.cpp existem duas variaveis que armazenam respectivamente o nome do arquivo de índice e o nome do arquivo de vocabulário. Segue como está o nome padrão em colecao.cpp:
+
+\texttt{const string Colecao::nome\_arquivo\_indice=``index.bin'';} 
+
+\texttt{const string Colecao::nome\_arquivo\_vocabulario=``voc.txt'';}
+
+\subsection{Configurar Pesquisa}
+
+A execução da pesquisa necessita de dois arquivos: o arquivo de índice e o arquivo de vocabulário. A atribuição de tais nomes fica no arquivo pesquisa.cpp. No início de pesquisa.cpp existem duas variaveis que armazenam respectivamente o nome do arquivo de índice e o nome do arquivo de vocabulário. Segue como está o nome padrão em pesqisa.cpp:
+
+\texttt{const string Colecao::nome\_arquivo\_indice=``index.bin'';} 
+
+\texttt{const string Colecao::nome\_arquivo\_vocabulario=``voc.txt'';}
+
+\subsection{Configurar Makefile}
+
+Três variáveis podem ser modificadas no arquivo de Makefile.
+
+\begin{enumerate}[a)]
+
+    \item \textbf{ricode:} diretório que contém o código da biblioteca que le arquivos compactados. Neste diretório devem estar os códigos fontes CollectionReader.cpp, CollectionWriter.cpp e Document.cpp.
+
+    \item \textbf{ridata:} É o diretorio onde se encontra o arquivo de índice e o arquivo de dados.
+
+ \item \textbf{riindex:} nome do arquivo com a listagem de arquivos a serem indexados.
+
+     \end{enumerate}
+
+     \subsection{Execução}
+
+A execução deste trabalho deve ser feita em duas partes. Primeiro compilar os fontes da pesquisa e do índice como explicado na seção anterior , depois executar a construção do índice e depois executar a pesquisa.
+
+Os principais testes são executados durante a pesquisa. No entanto, para isso o índice deve ser construído. Seguem nas próximas subseções alguns detalhes.
+
+
+A compilação do índice gerou um arquivo executável de nome ``index''. Este executável pode construir dois tipos de índice: comprimido e não comprimido.
+
+Para gerar o índice não comprimido basta executar no terminal:
+
+\texttt{./index DIRETORIO\_DE\_PAGINAS ARQUIVO\_PARA\_PAGINAS}
+
+A geração de índice comprimido é similar a execução do índice não comprimido. No entanto o usuário deve acrescentar a opção -c ao final do comando. Como a seguir:
+
+\texttt{./index DIRETORIO\_DE\_PAGINAS ARQUIVO\_PARA\_PAGINAS -c}
+
+ATENÇÃO: para gerar um novo índice apague o arquivo de índice anterior e o arquivo de vocabulário também.
+
+
+A compilação do código fonte da pesquisa gerou um arquivo executável de nome ``pesquisa''. Assim como o índice a pesquisa precisa do diretório de páginas e do arquivo de índice para as páginas para poder executar. Veja a sequir um exemplo:
+
+\texttt{./pesquisa DIRETORIO\_DE\_PAGINAS ARQUIVO\_PARA\_PAGINAS}
+
+A entrada de consultas para pesquisa é feita via entrada padrão. Após digitar a consulta desejada o usuário pressionar ENTER que a pesquisa é realizada.
+
+Após a exibição dos resultados o programa aguarda nova consulta do usuário. Para interromper o programa é necessário o usuário enviar um sinal de EOF ou Ctrl-C.
+
+\subsection{Testes prontos (make teste)}
+
+Existe um conjunto de palavras para pesquisa no arquivo palavras.txt. O usuário pode modificar este conjunto de palavras de teste.
+
+Neste conjunto de testes prontos inicialmente é construído arquivos de índice compactado e a lista de vocábulos correspondentes a este índice. Após esta construção é feita uma pesquisa com o conjunto de palavras em palavras.txt e o resultado é colocado em resultado\_compacta.txt.
+
+Após o teste em um índice compactado o script apaga o índice e o vocabulario criados. Então é criado um índice não compactado. Finalmente são realizadas as consultas contidas em palavras.txt e o resultado destas pesquisas é colocada em resultado\_normal.txt.
+
+\section{Resultados}
+
+Os resultados dependem da infraestrutura, do tamanho da base e claro da 
+implementação. A codificação foi bem detalhada nas seções anteriores. Nesta 
+seção detalharei a infraestrutura, os dados e como foi o desempenho diante 
+deste cenário.
+
+\subsection{Infraestrutura}
+
+Os testes foram testados em uma máquina com as seguintes configurações de 
+\emph{hardware}:
+
+\begin{itemize}
+    \item \textbf{Processador:} 1,8GHz Intel Core i5
+    \item \textbf{Memória:} 4GB 1600 MHz DDR3
+    \item \textbf{Disco:} Memória Flash com velocidade nominal de 6Gbps.
+\end{itemize}
+
+Como a placa gráfica no computador utilizado é embutido a placa mãe, a placa 
+gráfica reserva memória na memória principal, diminuindo ainda mais a capacidade 
+do computador. Existe também um gargalo na CPU do computador, pois o mesmo possui 
+um clock menor que os computadores atuais no mercado. 
+
+\subsection{Dados}
+
+Os dados utilizados foram um conjunto de x documentos. Na Tabela 
+\ref{tbl:infobase} existe 
+uma série de números que descrevem a base utilizada.
+
+Tamanho da run
+
+\begin{table}
+    \centering
+    \begin{tabular}{l|c}\hline
+	Descrição	& Quantidade \\ \hline\hline
+	Número de Palavras Distintas & 7109375 \\
+	Número de triplas & 474167762 \\
+	Número de documentos & 945642 \\
+	Tamanho da Base de Documentos Compactada & 4.7 GB\\
+	Tamanho do índice compactado  (Elias-$\gamma$)& 1.9 GB\\
+	Tamanho do índice não compactado & 4.4 GB\\ \hline 
+    \end{tabular}
+    \label{tbl:infobase}
+    \caption{Informações sobre a Base de Documentos fornecida}
+\end{table}
+
+A Tabela \ref{tbl:infobase} não descreve, mas o tamanho do arquivo escrito 
+na fase do parser dos documentos foi de 4.2 GB na versão compactada do sistema. 
+Acredito que o tamanho bem maior que na fase final tenha acontecido devido 
+a grande quantidade de informação duplicada. O mesmo acontece com a versão não 
+compactada, que na fase de parser dos documentos gerou um arquivo de tamanho 5.3GB 
+e na fase de ordenação gerou um arquivo de tamanho 4.4GB.
+
+%tabela 2
+%palavras mais frequentes
+
+\subsection{Desempenho}
+
+Para poder tentar acelerar o desempenho do \emph{n-way} merge foi utilizado 
+um buffer de 100000 triplas para cada \emph{run}. Assim cada vez que o 
+menor elemento de uma \emph{run} fosse atualizado ele apenas desempilharia um 
+elemento do buffer da run. 
+
+A comparação de tempo (segundos) entre as etapas da compressão no índice e da não 
+compressão no índice pode ser visto na Figura \ref{pic:tempo}. Como pode 
+ser visto operações de disco impactam significativamente o tempo. Ordenação de 
+runs, que envolve apenas memória, possui praticamente o mesmo tempo nas 
+duas abordagens.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[scale=0.5]{tempografico.png}
+    \caption{Gráfico do Tempo (segundos) das Etapas do Sistema utilizando Compressão e não utilizando compressão}
+    \label{pic:tempo}
+\end{figure}
+
+%testes 3 vezes
+%calcular variando o tamanho de runs: 10,20,30,40,50
+   % Calcular tempo do parser 
+   % Calcular tempo da ordenacao das runs
+   % calcular o tempo do mergesort
+
+O uso de um profiler nativo do Mac OS X chamado de Instruments em uma amostra 
+com 94061 páginas dá uma boa ideia do uso de recursos pelo sistema desenvolvido. 
+Veja que o processamento de documentos (a função \texttt{ler} faz  
+parser do HTML, tokenização do documento e escrita em disco do documento) e 
+a ordenação (a função \texttt{executa} da classe Ordenacao ordena as \emph{runs}) 
+dividem quase que igualmente o tempo total de execução do sistema. O 
+parser htmlcxx também mostra que é custoso, ocupando quase 10\% de tempo de 
+processamento da função \texttt{ler}. Na ordenação a etapa com o maior 
+tempo de processamento foi a ordenação individual de \emph{runs}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[scale=0.4]{leordena.png}
+    \caption{Profiling do Sistema de Indexação}
+    \label{pic:profiling}
+\end{figure}
+
+
+
+\section{Conclusão}
+
+Muitas dificuldades foram encontradas durante a implementação deste trabalho. 
+A maioria destas dificuldades estava relacionada com a falta de conhecimento 
+da linguagem de programação utilizada para a implementação ou com a falta 
+de experiência ao lidar com grandes dados.
+
+O uso de \emph{buffers} foi utilizado em todo trabalho.  A importância do uso 
+deste recurso foi sinalizado através do uso do \emph{profiler} \emph{Instruments}, 
+nativo do Mac OS X. O \emph{Instruments} mostrou como a operação em disco, 
+mesmo em SSD, pode ser um gargalo caso não seja adequadamente utilizada. 
+O próprio gráfico exibido na Figura 
+
+A utilização de comprensão também foi relevante para um melhor desempenho 
+do sistema e também do recurso de armazenamento, visto que seu índice final 
+ocupou \% espaço a menos que o índice não compactado.
+
+Embora o tempo de execução deste trabalho tenha sido alto a indexação de
+documentos foi executada com sucesso. 
+
+\bibliographystyle{plain}
+\bibliography{relatorio}
+
+\end{document}
+
+
