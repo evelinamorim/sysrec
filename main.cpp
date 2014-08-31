@@ -47,8 +47,13 @@ int main(int argc,char** argv){
     //leObj.imprime_itens(i);
 
     Recomenda recomenda_obj;
+
+    recomenda_obj.computa_nota_media(n);
     recomenda_obj.computa_similaridade(1,n);
-    
+    //recomenda_obj.imprime_similaridade();
+    //agora devo pegar os filmes em comum do top-k
+    recomenda_obj.computa_nota(1,n);
+    //recomenda_obj.imprime_predicao();
 
     //cout<<arquivoUsuario<<" "<<arquivoItem<<" "<<arquivoNotas<<endl;
     return 0;

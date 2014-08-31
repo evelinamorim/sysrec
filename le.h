@@ -30,7 +30,7 @@ using namespace std;
 
 typedef struct notas{
     unsigned int item_id;
-    short int nota;
+    float nota;
     long unsigned int timestamp;
 }Notas_t;
 
